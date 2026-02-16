@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Shapes.inc Memory Exporter",
+  "version": "1.0.0",
+  "description": "Export your long-term memories from Shapes.inc bots with one click.",
+  "permissions": ["activeTab"],
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://shapes.inc/*", "https://talk.shapes.inc/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
