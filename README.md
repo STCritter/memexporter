@@ -31,34 +31,39 @@ playwright install chromium
 
 ## Usage
 
-### Step 1: Log in (first time only)
+Just run:
 ```bash
-python memexporter.py --login
-```
-A browser opens at the Shapes.inc login page. Log in with your account (Google, email, etc.). The script auto-detects when you're done and saves your session.
-
-### Step 2: Export memories
-Go to your shape's memory page in your normal browser:
-`shapes.inc/YOUR-SHAPE/user/memory`
-
-Then run:
-```bash
-python memexporter.py https://shapes.inc/YOUR-SHAPE/user/memory
+python memexporter.py
 ```
 
-### Export multiple shapes at once
+The script guides you through everything step by step:
+
+1. **Login** — checks if you're logged in, opens a browser if not
+2. **Paste URLs** — asks you to paste your shape memory page URLs
+3. **Export** — scrapes all memory pages and saves the results
+
+That's it!
+
+### How to find your memory URL
+
+1. Go to `shapes.inc` in your browser
+2. Open your shape's settings
+3. Click **Memory** in the sidebar
+4. Copy the URL — it looks like: `shapes.inc/your-shape-name/user/memory`
+
+### Pass URLs directly (skip the prompts)
 ```bash
 python memexporter.py https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
 ```
 
 ### Custom output directory
 ```bash
-python memexporter.py URL --output ./my_backup
+python memexporter.py --output ./my_backup
 ```
 
 ### Debug mode
 ```bash
-python memexporter.py URL --debug
+python memexporter.py --debug
 ```
 Saves a `_debug.html` file if something goes wrong — useful for troubleshooting.
 
@@ -105,8 +110,8 @@ User likes pizza and hates mornings...
 ## Troubleshooting
 
 ### "Doesn't look like a memory page"
-- Make sure you ran `--login` first and logged in successfully.
-- Your session may have expired — run `--login` again.
+- Make sure you logged in when prompted.
+- Your session may have expired — just run the script again and it will re-prompt login.
 
 ### "No memories found"
 - Run with `--debug` and check the `_debug.html` file.

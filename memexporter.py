@@ -239,26 +239,240 @@ def url_to_shape_name(url):
     return match.group(1) if match else "unknown_shape"
 
 
+def make_launch_kwargs(browser_path):
+    """Common browser launch options."""
+    return {
+        "headless": False,
+        "args": ["--disable-blink-features=AutomationControlled"],
+        "viewport": {"width": 1280, "height": 900},
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "executable_path": browser_path,
+    }
+
+
+def do_login(p, profile, browser_path):
+    """Handle the login flow. Returns True if login succeeded."""
+    print("\n" + "=" * 50)
+    print("  Step 1: Log in to Shapes.inc")
+    print("=" * 50)
+    print()
+    print("  A browser window will open.")
+    print("  Log in with your Shapes.inc account (Google, email, etc.)")
+    print("  The script will detect when you're done.")
+    print()
+
+    os.makedirs(profile, exist_ok=True)
+    ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
+    pg = ctx.pages[0] if ctx.pages else ctx.new_page()
+    pg.goto("https://talk.shapes.inc/login", timeout=30000)
+
+    print("  [*] Waiting for you to log in...")
+    logged_in = False
+    for _ in range(600):  # 10 min max
+        time.sleep(1)
+        try:
+            url = pg.url
+            if "/login" not in url and "auth." not in url:
+                logged_in = True
+                break
+        except Exception:
+            break
+
+    if not logged_in:
+        print("  [!] Login timed out or failed.")
+        ctx.close()
+        return False
+
+    print("  [+] Login successful!")
+    print("  [*] Syncing session...")
+    try:
+        pg.goto("https://shapes.inc/dashboard", timeout=30000)
+        time.sleep(3)
+    except Exception:
+        pass
+    ctx.close()
+    return True
+
+
+def is_logged_in(p, profile, browser_path):
+    """Quick check if we have a valid session."""
+    if not os.path.exists(profile):
+        return False
+    try:
+        ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
+        pg = ctx.pages[0] if ctx.pages else ctx.new_page()
+        pg.goto("https://shapes.inc/dashboard", timeout=20000)
+        time.sleep(4)
+        body = pg.inner_text("body")
+        # If we see "My Shapes" or "Create Shape", we're logged in
+        logged = "My Shapes" in body or "Create Shape" in body
+        ctx.close()
+        return logged
+    except Exception:
+        return False
+
+
+def export_shape(page, url, output_dir, debug=False):
+    """Export memories from a single shape URL. Returns count exported."""
+    memory_url = url_to_memory_url(url)
+    shape_name = url_to_shape_name(url)
+
+    print(f"\n  [*] Shape: {shape_name}")
+    print(f"  [*] URL:   {memory_url}")
+    print(f"  [*] Navigating...")
+
+    page.goto(memory_url, timeout=30000)
+    time.sleep(4)
+
+    # Check if we landed on the memory page
+    body = page.inner_text("body")
+    if "User Memory" not in body and "memory" not in body.lower():
+        print("  [!] Doesn't look like a memory page.")
+        print("  [!] You might not have access to this shape's memories.")
+        if debug:
+            debug_path = os.path.join(output_dir, f"{shape_name}_debug.html")
+            os.makedirs(output_dir, exist_ok=True)
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(page.content())
+            print(f"  [*] Debug HTML saved: {debug_path}")
+        return 0
+
+    print("  [+] Memory page loaded!")
+
+    # Scrape all pages
+    memories = scrape_all_memory_pages(page)
+
+    if memories:
+        json_path, txt_path, count = export_memories(memories, shape_name, output_dir)
+        print(f"\n  [+] Exported {count} memories!")
+        print(f"      JSON: {json_path}")
+        print(f"      TXT:  {txt_path}")
+        return count
+    else:
+        print("\n  [!] No memories found on this page.")
+        if debug:
+            debug_path = os.path.join(output_dir, f"{shape_name}_debug.html")
+            os.makedirs(output_dir, exist_ok=True)
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(page.content())
+            print(f"  [*] Debug HTML saved: {debug_path}")
+        return 0
+
+
+def interactive_flow(args):
+    """Guided interactive mode — walks the user through everything."""
+    profile = args.profile or DEFAULT_PROFILE_DIR
+    browser_path = args.browser_path or find_browser()
+
+    print()
+    print("=" * 50)
+    print("  Shapes.inc Memory Exporter")
+    print("=" * 50)
+
+    if not browser_path:
+        print("\n  [!] Could not find Chromium or Google Chrome.")
+        print("  [!] Install one, or use --browser-path /path/to/chrome")
+        sys.exit(1)
+
+    # --- Step 1: Check login ---
+    print("\n  [*] Checking if you're already logged in...")
+
+    with sync_playwright() as p:
+        logged = is_logged_in(p, profile, browser_path)
+
+    if logged:
+        print("  [+] You're logged in!")
+    else:
+        print("  [!] Not logged in yet.")
+        with sync_playwright() as p:
+            if not do_login(p, profile, browser_path):
+                print("\n  [!] Could not log in. Please try again.")
+                sys.exit(1)
+
+    # --- Step 2: Get URLs ---
+    print("\n" + "=" * 50)
+    print("  Step 2: Choose shapes to export")
+    print("=" * 50)
+    print()
+    print("  How to find your memory URL:")
+    print("    1. Go to shapes.inc in your browser")
+    print("    2. Open your shape's settings")
+    print("    3. Click 'Memory' in the sidebar")
+    print("    4. Copy the URL from the address bar")
+    print()
+    print("  It looks like: shapes.inc/your-shape-name/user/memory")
+    print()
+
+    urls = list(args.urls) if args.urls else []
+
+    if not urls:
+        while True:
+            url = input("  Paste a memory URL (or press Enter to finish): ").strip()
+            if not url:
+                break
+            if "shapes.inc" not in url and not url.startswith("http"):
+                print("  [!] That doesn't look like a shapes.inc URL. Try again.")
+                continue
+            urls.append(url)
+            print(f"  [+] Added: {url_to_shape_name(url)}")
+            print()
+
+    if not urls:
+        print("  [!] No URLs provided. Nothing to export.")
+        sys.exit(0)
+
+    # --- Step 3: Export ---
+    print("\n" + "=" * 50)
+    print(f"  Step 3: Exporting memories ({len(urls)} shape(s))")
+    print("=" * 50)
+
+    with sync_playwright() as p:
+        ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+
+        total_exported = 0
+        results = []
+
+        for i, raw_url in enumerate(urls, 1):
+            print(f"\n  --- Shape {i}/{len(urls)} ---")
+            count = export_shape(page, raw_url, args.output, debug=args.debug)
+            total_exported += count
+            results.append((url_to_shape_name(raw_url), count))
+
+        try:
+            ctx.close()
+        except Exception:
+            pass
+
+    # --- Summary ---
+    print("\n" + "=" * 50)
+    print("  All done!")
+    print("=" * 50)
+    print()
+    for name, count in results:
+        status = f"{count} memories" if count > 0 else "no memories found"
+        print(f"    {name}: {status}")
+    print()
+    print(f"  Total: {total_exported} memories exported")
+    print(f"  Saved to: {os.path.abspath(args.output)}/")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Export memories from Shapes.inc bots",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-How to use:
-  1. Log in:    %(prog)s --login
-  2. Export:    %(prog)s https://shapes.inc/YOUR-SHAPE/user/memory
+Just run:  %(prog)s
+The script will guide you through login and export step by step.
 
-  You can export multiple shapes at once:
-     %(prog)s URL1 URL2 URL3
-
-  Custom output dir:
-     %(prog)s URL --output ./my_exports
+Or pass URLs directly:
+  %(prog)s https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
         """
     )
     parser.add_argument("urls", nargs="*",
-                        help="Memory page URL(s) — e.g. https://shapes.inc/sporty-9ujz/user/memory")
-    parser.add_argument("--login", action="store_true",
-                        help="Open browser to log in (run this first)")
+                        help="Memory page URL(s) (optional — you can paste them interactively)")
     parser.add_argument("--output", default=DEFAULT_OUTPUT_DIR,
                         help="Output directory (default: exports/)")
     parser.add_argument("--debug", action="store_true",
@@ -269,132 +483,7 @@ How to use:
                         help=f"Browser profile dir (default: {DEFAULT_PROFILE_DIR})")
     args = parser.parse_args()
 
-    profile = args.profile or DEFAULT_PROFILE_DIR
-    browser_path = args.browser_path or find_browser()
-
-    print("=" * 50)
-    print("  Shapes.inc Memory Exporter")
-    print("=" * 50)
-
-    if not browser_path:
-        print("[!] Could not find Chromium/Chrome. Install it or use --browser-path.")
-        sys.exit(1)
-
-    # --login: open browser via Playwright for manual login
-    if args.login:
-        print(f"\n[*] Opening browser for login...")
-        print(f"[*] Profile: {profile}")
-        print(f"[*] Log in in the browser window. The script will detect it automatically.\n")
-        os.makedirs(profile, exist_ok=True)
-        with sync_playwright() as p:
-            launch_kwargs = {
-                "headless": False,
-                "args": ["--disable-blink-features=AutomationControlled"],
-                "viewport": {"width": 1280, "height": 900},
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                "executable_path": browser_path,
-            }
-            ctx = p.chromium.launch_persistent_context(profile, **launch_kwargs)
-            pg = ctx.pages[0] if ctx.pages else ctx.new_page()
-            pg.goto("https://talk.shapes.inc/login", timeout=30000)
-            # Wait for login: URL will change away from /login after success
-            print("[*] Waiting for login...")
-            for _ in range(600):  # 10 minutes max
-                time.sleep(1)
-                url = pg.url
-                if "/login" not in url and "auth." not in url:
-                    break
-            print("[+] Login detected!")
-            # Visit shapes.inc/dashboard to save cookies for that domain too
-            print("[*] Syncing session to shapes.inc...")
-            pg.goto("https://shapes.inc/dashboard", timeout=30000)
-            time.sleep(3)
-            ctx.close()
-        print("\n[+] Session saved!")
-        print(f"[*] Now run: python {sys.argv[0]} https://shapes.inc/YOUR-SHAPE/user/memory")
-        return
-
-    # Need at least one URL
-    if not args.urls:
-        print("\n[!] No URLs provided.")
-        print("    Usage: python memexporter.py https://shapes.inc/YOUR-SHAPE/user/memory")
-        print("    First time? Run: python memexporter.py --login")
-        sys.exit(1)
-
-    # Launch browser with saved profile
-    print(f"\n[*] Using profile: {profile}")
-    print(f"[*] Using browser: {browser_path}")
-
-    with sync_playwright() as p:
-        launch_kwargs = {
-            "headless": False,
-            "args": ["--disable-blink-features=AutomationControlled"],
-            "viewport": {"width": 1280, "height": 900},
-            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "executable_path": browser_path,
-        }
-        context = p.chromium.launch_persistent_context(profile, **launch_kwargs)
-        page = context.pages[0] if context.pages else context.new_page()
-
-        total_exported = 0
-
-        for raw_url in args.urls:
-            memory_url = url_to_memory_url(raw_url)
-            shape_name = url_to_shape_name(raw_url)
-
-            print(f"\n{'=' * 40}")
-            print(f"[*] {shape_name}")
-            print(f"[*] {memory_url}")
-            print(f"{'=' * 40}")
-
-            # Navigate to memory page
-            page.goto(memory_url, timeout=30000)
-            time.sleep(4)
-
-            # Check if we landed on the memory page
-            body = page.inner_text("body")
-            if "User Memory" not in body and "memory" not in body.lower():
-                print("  [!] Doesn't look like a memory page.")
-                print("  [!] Make sure you're logged in: python memexporter.py --login")
-                if args.debug:
-                    debug_path = os.path.join(args.output, f"{shape_name}_debug.html")
-                    os.makedirs(args.output, exist_ok=True)
-                    with open(debug_path, "w", encoding="utf-8") as f:
-                        f.write(page.content())
-                    print(f"  [*] Debug HTML saved: {debug_path}")
-                continue
-
-            print("  [+] On memory page")
-
-            # Scrape all pages
-            memories = scrape_all_memory_pages(page)
-
-            if memories:
-                json_path, txt_path, count = export_memories(memories, shape_name, args.output)
-                print(f"\n  [+] Exported {count} memories:")
-                print(f"      JSON: {json_path}")
-                print(f"      TXT:  {txt_path}")
-                total_exported += count
-            else:
-                print("\n  [!] No memories found.")
-                if args.debug:
-                    debug_path = os.path.join(args.output, f"{shape_name}_debug.html")
-                    os.makedirs(args.output, exist_ok=True)
-                    with open(debug_path, "w", encoding="utf-8") as f:
-                        f.write(page.content())
-                    print(f"  [*] Debug HTML saved: {debug_path}")
-
-        print(f"\n{'=' * 50}")
-        print(f"  Done! Exported {total_exported} total memories.")
-        print(f"  Output: {os.path.abspath(args.output)}")
-        print(f"{'=' * 50}")
-
-        try:
-            context.close()
-        except Exception:
-            pass
+    interactive_flow(args)
 
 
 if __name__ == "__main__":
