@@ -2,24 +2,18 @@
 
 Bulk export long-term memories from your [Shapes.inc](https://shapes.inc) bots.
 
-Shapes.inc disables browser DevTools on their dashboard, making it difficult to access your own data. This tool uses browser automation to log in through the normal UI, navigate to your shapes' memory pages, and **intercept the API responses** that contain the actual memory data — filtering out shape metadata (name, personality, settings, etc.) so you only get the memories.
-
 ## How It Works
 
-1. Opens a real browser window (Chromium via Playwright)
-2. Navigates to shapes.inc and waits for you to log in via Discord OAuth
-3. Detects your shapes from the dashboard
-4. For each shape, navigates to the memories page
-5. Scrolls to load all memories (handles infinite scroll + "Load More" buttons)
-6. **Intercepts API responses** to capture memory data (primary method)
-7. Falls back to DOM scraping if API interception finds nothing
-8. Filters out shape metadata — only exports actual memory entries
-9. Exports to both JSON (structured) and TXT (human-readable) files
+1. You log in to shapes.inc via a browser (one-time setup)
+2. You give the script the URL of your shape's memory page
+3. The script navigates there, paginates through all pages, and scrapes every memory
+4. Exports to JSON + TXT files
 
 ## Requirements
 
 - Python 3.8+
-- A Shapes.inc account with bots that have memories
+- Chromium or Google Chrome installed
+- A Shapes.inc account with shapes that have memories
 
 ## Installation
 
@@ -37,37 +31,36 @@ playwright install chromium
 
 ## Usage
 
-### Interactive mode (recommended)
+### Step 1: Log in (first time only)
 ```bash
-python memexporter.py
+python memexporter.py --login
 ```
-A browser window opens → log in with Discord → pick a shape → memories get exported.
+A browser opens at the Shapes.inc login page. Log in with your account (Google, email, etc.). The script auto-detects when you're done and saves your session.
 
-### Export from a specific shape
+### Step 2: Export memories
+Go to your shape's memory page in your normal browser:
+`shapes.inc/YOUR-SHAPE/user/memory`
+
+Then run:
 ```bash
-python memexporter.py --shape-url "https://shapes.inc/dashboard/your-shape-id"
+python memexporter.py https://shapes.inc/YOUR-SHAPE/user/memory
 ```
 
-### Export ALL shapes at once
+### Export multiple shapes at once
 ```bash
-python memexporter.py --all
+python memexporter.py https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
 ```
 
 ### Custom output directory
 ```bash
-python memexporter.py --output ./my_backup
+python memexporter.py URL --output ./my_backup
 ```
 
-### Show browser window the whole time (for debugging)
+### Debug mode
 ```bash
-python memexporter.py --headed
+python memexporter.py URL --debug
 ```
-
-### Debug mode (dump all captured API responses)
-```bash
-python memexporter.py --debug
-```
-Saves a `_api_debug.json` file showing every API response captured — useful for troubleshooting if memories aren't being found.
+Saves a `_debug.html` file if something goes wrong — useful for troubleshooting.
 
 ## Output
 
@@ -75,20 +68,21 @@ Memories are saved in the `exports/` directory (or your custom path):
 
 ```
 exports/
-├── MyBot_20260215_110000.json    # Structured data
-└── MyBot_20260215_110000.txt     # Human-readable
+├── my-shape_20260216_091345.json    # Structured data
+└── my-shape_20260216_091345.txt     # Human-readable
 ```
 
 ### JSON format
 ```json
 {
-  "shape": "MyBot",
-  "exported_at": "2026-02-15T11:00:00",
-  "count": 42,
+  "shape": "my-shape",
+  "exported_at": "2026-02-16T09:13:45",
+  "count": 36,
   "memories": [
     {
-      "id": "mem_abc123",
-      "content": "User likes pizza and hates mornings..."
+      "type": "automatic",
+      "content": "User likes pizza and hates mornings...",
+      "date": "04/07/2025"
     }
   ]
 }
@@ -96,39 +90,37 @@ exports/
 
 ### TXT format
 ```
-Memories for: MyBot
-Exported: 2026-02-15T11:00:00
-Total: 42
+Memories for: my-shape
+Exported: 2026-02-16T09:13:45
+Total: 36
 ============================================================
 
---- Memory #1 ---
+--- Memory #1 [AUTOMATIC] 04/07/2025 ---
 User likes pizza and hates mornings...
 
---- Memory #2 ---
+--- Memory #2 [AUTOMATIC] 03/01/2025 ---
 ...
 ```
 
 ## Troubleshooting
 
-### "No memories found"
-- Run with `--debug` to see all API responses the dashboard made. The `_api_debug.json` file will show you what data came back.
-- The script also saves a `_debug.html` file of the page. Open it to see what the page looks like.
-- Shapes.inc may have changed their API structure. Open an issue with the debug file.
+### "Doesn't look like a memory page"
+- Make sure you ran `--login` first and logged in successfully.
+- Your session may have expired — run `--login` again.
 
-### Login doesn't work
-- Make sure you're logging in with the Discord account that owns the shapes.
-- The script waits 5 minutes for login by default. Use `--timeout 600` for more time.
+### "No memories found"
+- Run with `--debug` and check the `_debug.html` file.
+- Shapes.inc may have changed their page structure. Open an issue with the debug file.
 
 ### Browser doesn't open
-- Make sure you ran `playwright install chromium` after installing.
-- On headless Linux servers, you may need: `playwright install --with-deps chromium`
+- Make sure Chromium or Chrome is installed on your system.
+- Use `--browser-path /path/to/chrome` if auto-detection doesn't work.
+- On headless Linux servers: `playwright install --with-deps chromium`
 
 ## Limitations
 
-- This tool intercepts API calls from the web UI, so it may break if Shapes.inc changes their API or dashboard.
-- DevTools detection bypass works on most setups but isn't guaranteed.
-- Rate limiting: the script adds delays between requests to be respectful.
-- Only exports **memory entries** — shape config, personality, backstory, etc. are intentionally filtered out.
+- Scrapes the web UI, so it may break if Shapes.inc changes their page structure.
+- Only exports **memory entries** — shape config, personality, backstory, etc. are not included.
 
 ## License
 
