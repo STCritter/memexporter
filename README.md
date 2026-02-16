@@ -1,83 +1,76 @@
 # Shapes.inc Memory Exporter
 
-Bulk export long-term memories from your [Shapes.inc](https://shapes.inc) bots.
+Export your long-term memories from [Shapes.inc](https://shapes.inc) bots. Supports all your shapes, handles pagination automatically, and saves to JSON + TXT.
 
-## How It Works
+## Two ways to use it
 
-1. You log in to shapes.inc via a browser (one-time setup)
-2. You give the script the URL of your shape's memory page
-3. The script navigates there, paginates through all pages, and scrapes every memory
-4. Exports to JSON + TXT files
+### Option 1: Python script (recommended)
 
-## Requirements
+#### Setup (one time)
 
-- Python 3.8+
-- Chromium or Google Chrome installed
-- A Shapes.inc account with shapes that have memories
-
-## Installation
-
+1. Install [Python 3.8+](https://www.python.org/downloads/) and [Chrome](https://www.google.com/chrome/) or [Chromium](https://www.chromium.org/)
+2. Download this repo — click the green **Code** button above → **Download ZIP** → unzip it
+3. Open a terminal in the folder and run:
 ```bash
-# Clone the repo
-git clone https://github.com/STCritter/memexporter.git
-cd memexporter
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Install the browser (one-time)
 playwright install chromium
 ```
 
-## Usage
+#### Running it
 
-Just run:
-```bash
-python memexporter.py
-```
+- **Windows** — double-click `run.bat`
+- **Linux / macOS** — double-click `run.sh` (or run `./run.sh`)
 
-The script guides you through everything step by step:
+The script walks you through everything:
 
-1. **Login** — checks if you're logged in, opens a browser if not
-2. **Paste URLs** — asks you to paste your shape memory page URLs
-3. **Export** — scrapes all memory pages and saves the results
+1. Checks if you're logged in (opens a browser to log in if not)
+2. Asks you to paste your memory page URL(s)
+3. Scrapes all pages and downloads the results
 
-That's it!
-
-### How to find your memory URL
+#### How to find your memory URL
 
 1. Go to `shapes.inc` in your browser
-2. Open your shape's settings
+2. Open your shape's page
 3. Click **Memory** in the sidebar
-4. Copy the URL — it looks like: `shapes.inc/your-shape-name/user/memory`
+4. Copy the URL from the address bar — looks like: `shapes.inc/your-shape/user/memory`
 
-### Pass URLs directly (skip the prompts)
+#### Options
+
 ```bash
+# Pass URLs directly (skip the prompts)
 python memexporter.py https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
-```
 
-### Custom output directory
-```bash
+# Custom output folder
 python memexporter.py --output ./my_backup
-```
 
-### Debug mode
-```bash
+# Debug mode (saves page HTML if something goes wrong)
 python memexporter.py --debug
 ```
-Saves a `_debug.html` file if something goes wrong — useful for troubleshooting.
+
+---
+
+### Option 2: Chrome extension (no Python needed)
+
+1. Download this repo and unzip it
+2. Open Chrome → go to `chrome://extensions`
+3. Turn on **Developer mode** (top right toggle)
+4. Click **Load unpacked** → select the `extension` folder
+5. Go to your shape's memory page on `shapes.inc`
+6. Click the extension icon → **Export Memories**
+
+---
 
 ## Output
 
-Memories are saved in the `exports/` directory (or your custom path):
+Memories are saved in the `exports/` folder:
 
 ```
 exports/
-├── my-shape_20260216_091345.json    # Structured data
-└── my-shape_20260216_091345.txt     # Human-readable
+├── my-shape_20260216_091345.json
+└── my-shape_20260216_091345.txt
 ```
 
-### JSON format
+**JSON:**
 ```json
 {
   "shape": "my-shape",
@@ -86,22 +79,21 @@ exports/
   "memories": [
     {
       "type": "automatic",
-      "content": "User likes pizza and hates mornings...",
+      "content": "User mentioned they like pizza...",
       "date": "04/07/2025"
     }
   ]
 }
 ```
 
-### TXT format
+**TXT:**
 ```
 Memories for: my-shape
-Exported: 2026-02-16T09:13:45
 Total: 36
 ============================================================
 
 --- Memory #1 [AUTOMATIC] 04/07/2025 ---
-User likes pizza and hates mornings...
+User mentioned they like pizza...
 
 --- Memory #2 [AUTOMATIC] 03/01/2025 ---
 ...
@@ -109,27 +101,18 @@ User likes pizza and hates mornings...
 
 ## Troubleshooting
 
-### "Doesn't look like a memory page"
-- Make sure you logged in when prompted.
-- Your session may have expired — just run the script again and it will re-prompt login.
-
-### "No memories found"
-- Run with `--debug` and check the `_debug.html` file.
-- Shapes.inc may have changed their page structure. Open an issue with the debug file.
-
-### Browser doesn't open
-- Make sure Chromium or Chrome is installed on your system.
-- Use `--browser-path /path/to/chrome` if auto-detection doesn't work.
-- On headless Linux servers: `playwright install --with-deps chromium`
+- **"Doesn't look like a memory page"** — you're not logged in, or the session expired. Run the script again and it will re-prompt login.
+- **"No memories found"** — run with `--debug` and check the `_debug.html` file. Open an issue if it persists.
+- **Browser doesn't open** — make sure Chrome or Chromium is installed. Use `--browser-path /path/to/chrome` if auto-detection fails.
 
 ## Limitations
 
-- Scrapes the web UI, so it may break if Shapes.inc changes their page structure.
-- Only exports **memory entries** — shape config, personality, backstory, etc. are not included.
+- Scrapes the web UI — may break if Shapes.inc changes their page structure.
+- Only exports **memory entries** — shape config, personality, etc. are not included.
 
 ## License
 
-MIT — do whatever you want with it.
+MIT
 
 ## Contributing
 
