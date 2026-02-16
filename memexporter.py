@@ -198,7 +198,7 @@ def fetch_memories_via_api(context, shape_uuid):
                 pass
             break
 
-        entries = data if isinstance(data, list) else data.get("memories", data.get("data", []))
+        entries = data if isinstance(data, list) else data.get("items", data.get("memories", data.get("data", [])))
         if isinstance(data, dict) and not isinstance(entries, list):
             entries = [data]
         if isinstance(data, list):
