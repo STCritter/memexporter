@@ -1,5 +1,4 @@
 @echo off
-title Shapes.inc Memory Exporter
 cd /d "%~dp0"
 
 if not exist ".installed" (
@@ -11,7 +10,7 @@ if not exist ".installed" (
         pause
         exit /b 1
     )
-    playwright install chromium firefox
+    playwright install chromium
     echo. > .installed
     echo.
 )

@@ -27,7 +27,7 @@ if [ ! -f ".installed" ]; then
         read -p "Press Enter to close..."
         exit 1
     fi
-    playwright install chromium firefox
+    playwright install chromium
     touch .installed
     echo
 fi
