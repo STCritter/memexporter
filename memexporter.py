@@ -173,7 +173,7 @@ def click_next_page(page):
         btn = page.query_selector('button[aria-label="Next page"]')
         if btn and btn.is_visible():
             btn.click()
-            time.sleep(2)
+            time.sleep(1)
             return True
     except Exception:
         pass
@@ -192,7 +192,7 @@ def click_next_page(page):
                         disabled = btn.get_attribute("disabled")
                         if disabled is None:
                             btn.click()
-                            time.sleep(2)
+                            time.sleep(1)
                             return True
             except Exception:
                 continue
@@ -208,7 +208,7 @@ def click_next_page(page):
                 btns = parent.query_selector_all("button")
                 if len(btns) >= 2:
                     btns[-1].click()
-                    time.sleep(2)
+                    time.sleep(1)
                     return True
     except Exception:
         pass
@@ -216,49 +216,64 @@ def click_next_page(page):
     return False
 
 
-def click_prev_page(page):
-    """Click the left/previous arrow button. Returns True if clicked."""
-    try:
-        btn = page.query_selector('button[aria-label="Previous page"]')
-        if btn and btn.is_visible():
-            btn.click(timeout=5000)
-            time.sleep(2)
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def go_to_first_page(page):
-    """Navigate back to page 1 if not already there."""
-    current, total = get_page_info(page)
-    while current > 1:
-        if not click_prev_page(page):
-            break
-        current, total = get_page_info(page)
-
-
-def scrape_all_memory_pages(page):
+def scrape_all_memory_pages(page, shape_name=None, output_dir=None):
     """Scrape memories from all pages, starting from page 1."""
     all_memories = []
 
-    # Always start from page 1
-    go_to_first_page(page)
+    # Reload the page to ensure we start from page 1
+    current_page, total_pages = get_page_info(page)
+    if current_page != 1:
+        page.reload()
+        try:
+            page.wait_for_selector("text=User Memory", timeout=10000)
+        except Exception:
+            pass
+        time.sleep(2)
 
     current_page, total_pages = get_page_info(page)
     print(f"  [*] {total_pages} page(s) of memories")
 
+    # For large exports, save incrementally every 50 pages
+    save_every = 50
+
     for pg in range(1, total_pages + 1):
         if pg > 1:
             if not click_next_page(page):
-                print(f"  [!] Could not go to page {pg}")
-                break
+                print(f"  [!] Could not go to page {pg}, retrying...")
+                time.sleep(2)
+                if not click_next_page(page):
+                    print(f"  [!] Failed to go to page {pg}. Saving what we have.")
+                    break
 
         page_memories = scrape_current_page_memories(page)
-        print(f"  [*] Page {pg}/{total_pages}: {len(page_memories)} memories")
+        count = len(page_memories)
+        pct = int(pg / total_pages * 100)
+        print(f"  [*] Page {pg}/{total_pages} ({pct}%): {count} memories", end="")
         all_memories.extend(page_memories)
+        print(f"  [total: {len(all_memories)}]")
+
+        # Incremental save for large exports
+        if shape_name and output_dir and total_pages > 10 and pg % save_every == 0:
+            _save_progress(all_memories, shape_name, output_dir)
+            print(f"  [*] Progress saved ({len(all_memories)} memories so far)")
 
     return all_memories
+
+
+def _save_progress(memories, shape_name, output_dir):
+    """Save partial progress to a temp file."""
+    os.makedirs(output_dir, exist_ok=True)
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in shape_name).strip()
+    path = os.path.join(output_dir, f"{safe_name}_progress.json")
+    seen = set()
+    unique = []
+    for m in memories:
+        key = m.get("content", "")
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(m)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"shape": shape_name, "count": len(unique), "memories": unique}, f, indent=2, ensure_ascii=False)
 
 
 def export_memories(memories, shape_name, output_dir):
@@ -440,7 +455,7 @@ def export_shape(page, url, output_dir, debug=False):
     print("  [+] Memory page loaded!")
 
     # Scrape all pages
-    memories = scrape_all_memory_pages(page)
+    memories = scrape_all_memory_pages(page, shape_name=shape_name, output_dir=output_dir)
 
     if memories:
         json_path, txt_path, count = export_memories(memories, shape_name, output_dir)
