@@ -61,6 +61,34 @@ User talked about their favorite pizza toppings...
 ...
 ```
 
+## Manual export (no script needed)
+
+If the script doesn't work for you, you can export memories manually from your browser:
+
+1. Go to your shape's memory page (e.g. `shapes.inc/your-shape/user/memory`)
+2. Press **F12** to open Developer Tools
+3. Click the **Network** tab
+4. Reload the page (**F5**)
+5. In the filter box, type **`memory`**
+6. You'll see a request like `memory/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx?page=1&limit=20`
+7. Copy the long ID between `memory/` and `?` — that's your shape's UUID
+8. Open a new tab and go to:
+   ```
+   https://shapes.inc/api/memory/YOUR-UUID?page=1&limit=10000
+   ```
+9. **Ctrl+A** to select all, **Ctrl+C** to copy
+10. Paste into Notepad, save as `memories.json`
+
+### Converting JSON to readable text
+
+Got a `memories.json` and want it as readable text? Use the included converter:
+
+- **Windows** — drag and drop your `.json` file onto `json2txt.bat`
+- **Linux / macOS** — run `./json2txt.sh memories.json`
+- **Or directly** — `python json2txt.py memories.json`
+
+It creates a `.txt` file with all memories formatted nicely with type and date.
+
 ## Troubleshooting
 
 - **"Could not fetch memories"** — you're not logged in, or the session expired. Run the script again.
