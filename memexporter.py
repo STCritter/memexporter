@@ -36,10 +36,50 @@ DEFAULT_PROFILE_DIR = os.path.expanduser("~/.memexporter-profile")
 def find_browser():
     """Find a system Chromium/Chrome executable."""
     import shutil
+    import platform
+
+    # Check PATH first (works on all OSes)
     for candidate in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
         found = shutil.which(candidate)
         if found:
             return found
+
+    # macOS common locations
+    mac_paths = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ]
+
+    # Windows common locations
+    win_paths = [
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    ]
+
+    check_paths = mac_paths if platform.system() == "Darwin" else win_paths if platform.system() == "Windows" else []
+    for path in check_paths:
+        if os.path.exists(path):
+            return path
+
+    # Fallback: try Playwright's bundled chromium
+    try:
+        from playwright._impl._driver import compute_driver_executable
+        driver = compute_driver_executable()
+        pw_browsers = os.path.join(os.path.dirname(driver), "..", "driver", "package", ".local-browsers")
+        if not os.path.exists(pw_browsers):
+            pw_browsers = os.path.expanduser("~/.cache/ms-playwright")
+        if os.path.exists(pw_browsers):
+            for root, dirs, files in os.walk(pw_browsers):
+                for f in files:
+                    if f in ("chromium", "chrome", "chrome.exe"):
+                        full = os.path.join(root, f)
+                        if os.access(full, os.X_OK):
+                            return full
+    except Exception:
+        pass
+
     return None
 
 
