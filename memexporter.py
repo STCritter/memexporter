@@ -168,13 +168,25 @@ def scrape_current_page_memories(page):
 
 def click_next_page(page):
     """Click the right/next arrow button in pagination. Returns True if clicked."""
+    # Try aria-label first (most reliable)
+    try:
+        btn = page.query_selector('button[aria-label="Next page"]')
+        if btn and btn.is_visible():
+            btn.click()
+            time.sleep(2)
+            return True
+    except Exception:
+        pass
+
+    # Try finding button with right arrow icon
     try:
         buttons = page.query_selector_all("button")
         for btn in buttons:
             try:
                 inner = btn.inner_html()
                 text = btn.inner_text().strip()
-                if ("chevron-right" in inner or "arrow-right" in inner
+                if ('data-icon="right"' in inner or "fa-right" in inner
+                        or "chevron-right" in inner or "arrow-right" in inner
                         or "ChevronRight" in inner or text in ("\u2192", "\u203a", ">")):
                     if btn.is_visible() and btn.is_enabled():
                         disabled = btn.get_attribute("disabled")
@@ -195,7 +207,7 @@ def click_next_page(page):
             if parent:
                 btns = parent.query_selector_all("button")
                 if len(btns) >= 2:
-                    btns[1].click()
+                    btns[-1].click()
                     time.sleep(2)
                     return True
     except Exception:
@@ -204,9 +216,35 @@ def click_next_page(page):
     return False
 
 
+def click_prev_page(page):
+    """Click the left/previous arrow button. Returns True if clicked."""
+    try:
+        btn = page.query_selector('button[aria-label="Previous page"]')
+        if btn and btn.is_visible():
+            btn.click(timeout=5000)
+            time.sleep(2)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def go_to_first_page(page):
+    """Navigate back to page 1 if not already there."""
+    current, total = get_page_info(page)
+    while current > 1:
+        if not click_prev_page(page):
+            break
+        current, total = get_page_info(page)
+
+
 def scrape_all_memory_pages(page):
-    """Scrape memories from all pages."""
+    """Scrape memories from all pages, starting from page 1."""
     all_memories = []
+
+    # Always start from page 1
+    go_to_first_page(page)
+
     current_page, total_pages = get_page_info(page)
     print(f"  [*] {total_pages} page(s) of memories")
 
