@@ -325,12 +325,21 @@ def do_login(p, profile, browser_path):
         return False
 
     print("  [+] Login successful!")
-    print("  [*] Syncing session...")
-    try:
-        pg.goto("https://shapes.inc/dashboard", timeout=30000)
-        time.sleep(3)
-    except Exception:
-        pass
+    print("  [*] Syncing session with shapes.inc...")
+    # Navigate to shapes.inc pages to ensure cookies are set for that domain
+    for sync_url in ["https://shapes.inc", "https://shapes.inc/dashboard"]:
+        try:
+            pg.goto(sync_url, timeout=30000)
+            time.sleep(4)
+        except Exception:
+            pass
+    # Verify we can actually access a dashboard page
+    body = pg.inner_text("body")
+    if "My Shapes" in body or "Create Shape" in body:
+        print("  [+] Session verified!")
+    else:
+        print("  [!] Warning: session may not be fully synced.")
+        print("  [!] If export fails, try running the script again.")
     ctx.close()
     return True
 
@@ -343,10 +352,11 @@ def is_logged_in(p, profile, browser_path):
         ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
         pg = ctx.pages[0] if ctx.pages else ctx.new_page()
         pg.goto("https://shapes.inc/dashboard", timeout=20000)
-        time.sleep(4)
+        time.sleep(6)
         body = pg.inner_text("body")
-        # If we see "My Shapes" or "Create Shape", we're logged in
-        logged = "My Shapes" in body or "Create Shape" in body
+        url = pg.url
+        # Must see dashboard content AND not be on a login/auth page
+        logged = ("My Shapes" in body or "Create Shape" in body) and "/login" not in url and "auth." not in url
         ctx.close()
         return logged
     except Exception:
@@ -365,11 +375,22 @@ def export_shape(page, url, output_dir, debug=False):
     page.goto(memory_url, timeout=30000)
     time.sleep(4)
 
-    # Check if we landed on the memory page
+    # Wait for memory content to render (React SPA)
+    try:
+        page.wait_for_selector("text=User Memory", timeout=10000)
+    except Exception:
+        pass
+    time.sleep(2)
+
+    # Check if we landed on the actual memory page (not just the public profile)
     body = page.inner_text("body")
-    if "User Memory" not in body and "memory" not in body.lower():
+    is_memory_page = "User Memory" in body and ("Page" in body or "SELECT ALL" in body or "Add New Memory" in body)
+    if not is_memory_page:
         print("  [!] Doesn't look like a memory page.")
-        print("  [!] You might not have access to this shape's memories.")
+        if "Log in" in body or "Sign up" in body:
+            print("  [!] You're not logged in. Run the script again to re-login.")
+        else:
+            print("  [!] You might not have access to this shape's memories.")
         if debug:
             debug_path = os.path.join(output_dir, f"{shape_name}_debug.html")
             os.makedirs(output_dir, exist_ok=True)
