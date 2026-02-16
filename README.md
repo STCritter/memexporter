@@ -1,8 +1,8 @@
 # Shapes.inc Memory Exporter
 
-Bulk export all long-term memories from your [Shapes.inc](https://shapes.inc) bots.
+Bulk export long-term memories from your [Shapes.inc](https://shapes.inc) bots.
 
-Shapes.inc disables browser DevTools on their dashboard, making it difficult to access your own data. This tool uses browser automation to log in through the normal UI, navigate to your shapes' memory pages, and export everything to JSON and TXT files.
+Shapes.inc disables browser DevTools on their dashboard, making it difficult to access your own data. This tool uses browser automation to log in through the normal UI, navigate to your shapes' memory pages, and **intercept the API responses** that contain the actual memory data — filtering out shape metadata (name, personality, settings, etc.) so you only get the memories.
 
 ## How It Works
 
@@ -11,8 +11,10 @@ Shapes.inc disables browser DevTools on their dashboard, making it difficult to 
 3. Detects your shapes from the dashboard
 4. For each shape, navigates to the memories page
 5. Scrolls to load all memories (handles infinite scroll + "Load More" buttons)
-6. Scrapes memories from the page DOM **and** intercepts API responses
-7. Exports to both JSON (structured) and TXT (human-readable) files
+6. **Intercepts API responses** to capture memory data (primary method)
+7. Falls back to DOM scraping if API interception finds nothing
+8. Filters out shape metadata — only exports actual memory entries
+9. Exports to both JSON (structured) and TXT (human-readable) files
 
 ## Requirements
 
@@ -61,6 +63,12 @@ python memexporter.py --output ./my_backup
 python memexporter.py --headed
 ```
 
+### Debug mode (dump all captured API responses)
+```bash
+python memexporter.py --debug
+```
+Saves a `_api_debug.json` file showing every API response captured — useful for troubleshooting if memories aren't being found.
+
 ## Output
 
 Memories are saved in the `exports/` directory (or your custom path):
@@ -103,8 +111,9 @@ User likes pizza and hates mornings...
 ## Troubleshooting
 
 ### "No memories found"
-- The script saves a `_debug.html` file when this happens. Open it to see what the page looks like.
-- Shapes.inc may have changed their page structure. Open an issue with the debug file.
+- Run with `--debug` to see all API responses the dashboard made. The `_api_debug.json` file will show you what data came back.
+- The script also saves a `_debug.html` file of the page. Open it to see what the page looks like.
+- Shapes.inc may have changed their API structure. Open an issue with the debug file.
 
 ### Login doesn't work
 - Make sure you're logging in with the Discord account that owns the shapes.
@@ -116,9 +125,10 @@ User likes pizza and hates mornings...
 
 ## Limitations
 
-- This tool scrapes the web UI, so it may break if Shapes.inc changes their dashboard layout.
+- This tool intercepts API calls from the web UI, so it may break if Shapes.inc changes their API or dashboard.
 - DevTools detection bypass works on most setups but isn't guaranteed.
 - Rate limiting: the script adds delays between requests to be respectful.
+- Only exports **memory entries** — shape config, personality, backstory, etc. are intentionally filtered out.
 
 ## License
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 Shapes.inc Memory Exporter
-Exports all long-term memories from your Shapes.inc bots.
+Exports long-term memories from your Shapes.inc bots.
 
-Since shapes.inc blocks browser DevTools, this script uses Playwright
-to automate a real browser session, log in via Discord OAuth, and
-scrape all memories from the dashboard.
+Shapes.inc is a React SPA that loads memories via internal API calls.
+This script uses Playwright to automate a real browser session, log in
+via Discord OAuth, navigate to the memories section, and intercept
+the network responses that contain the actual memory data.
 """
 
 import argparse
@@ -89,45 +90,144 @@ def get_shapes_list(page):
 
 
 def intercept_api_calls(page):
-    """Set up request interception to capture API responses containing memories."""
-    captured = {"memories": [], "requests": []}
+    """Set up request interception to capture ALL API/fetch responses.
+    We cast a wide net here and filter later."""
+    captured = {"responses": [], "requests": []}
 
     def handle_response(response):
         url = response.url
-        if "memor" in url.lower() or "api" in url.lower():
-            captured["requests"].append(url)
-            try:
-                if response.status == 200:
-                    content_type = response.headers.get("content-type", "")
-                    if "json" in content_type:
-                        data = response.json()
-                        captured["memories"].append({
-                            "url": url,
-                            "data": data
-                        })
-            except Exception:
-                pass
+        # Skip static assets
+        if any(url.endswith(ext) for ext in (".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff", ".woff2", ".ttf")):
+            return
+        # Skip known non-data URLs
+        if any(skip in url for skip in ("google", "analytics", "sentry", "hotjar", "facebook", "cdn.")):
+            return
+        try:
+            if response.status == 200:
+                content_type = response.headers.get("content-type", "")
+                if "json" in content_type or "text" in content_type:
+                    body = response.text()
+                    captured["requests"].append(url)
+                    try:
+                        data = json.loads(body)
+                    except (json.JSONDecodeError, ValueError):
+                        data = None
+                    captured["responses"].append({
+                        "url": url,
+                        "status": response.status,
+                        "data": data,
+                        "body_preview": body[:500] if data is None else None,
+                        "body_length": len(body)
+                    })
+        except Exception:
+            pass
 
     page.on("response", handle_response)
     return captured
 
 
-def scrape_memories_from_page(page):
-    """Scrape memories directly from the rendered page DOM."""
+def extract_memories_from_responses(captured):
+    """Extract actual memory entries from captured API responses.
+    Filters out shape metadata, config, and non-memory data."""
     memories = []
 
-    # Common selectors for memory items
+    # Shape metadata keys that indicate non-memory data
+    shape_meta_keys = {
+        "vanity_url", "shape_id", "discord_bot_token", "app_id",
+        "server_count", "member_count", "backstory", "personality",
+        "initial_message", "system_prompt", "profile_image",
+        "banner_image", "display_name", "short_description",
+        "long_description", "knowledge_base", "model_config",
+        "temperature", "top_p", "max_tokens", "settings",
+        "configuration", "engine", "free_will",
+    }
+
+    for resp in captured["responses"]:
+        data = resp.get("data")
+        url = resp.get("url", "")
+        if data is None:
+            continue
+
+        # Try to find memory arrays in the response
+        candidates = []
+
+        if isinstance(data, list):
+            candidates = data
+        elif isinstance(data, dict):
+            # Look for common memory container keys
+            for key in ("memories", "data", "results", "items", "records",
+                        "long_term_memories", "ltm", "memory_list"):
+                val = data.get(key)
+                if isinstance(val, list) and len(val) > 0:
+                    candidates = val
+                    break
+            # If the dict itself looks like a single memory
+            if not candidates and "content" in data and "id" in data:
+                candidates = [data]
+
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+
+            # Skip if this looks like shape metadata
+            item_keys = set(item.keys())
+            if item_keys & shape_meta_keys:
+                # If more than 2 metadata keys match, skip it
+                if len(item_keys & shape_meta_keys) >= 2:
+                    continue
+
+            # Extract memory content from common field names
+            content = (
+                item.get("content")
+                or item.get("text")
+                or item.get("memory")
+                or item.get("summary")
+                or item.get("value")
+                or item.get("message")
+                or ""
+            )
+
+            if not content or not isinstance(content, str):
+                continue
+
+            # Skip very short entries (likely labels/IDs)
+            if len(content.strip()) < 10:
+                continue
+
+            memory_entry = {
+                "content": content.strip(),
+                "source_url": url,
+            }
+
+            # Preserve useful metadata fields
+            for field in ("id", "created_at", "updated_at", "timestamp",
+                          "user_id", "channel_id", "type", "category",
+                          "importance", "score", "tags"):
+                if field in item:
+                    memory_entry[field] = item[field]
+
+            memories.append(memory_entry)
+
+    return memories
+
+
+def scrape_memories_from_dom(page):
+    """Fallback: try to scrape memory entries from the DOM.
+    Only used if network interception found nothing."""
+    memories = []
+
+    # Look specifically for memory list containers and their children
     selectors = [
-        '[class*="memory"]',
-        '[class*="Memory"]',
+        '[class*="memory-list"] > div',
+        '[class*="memoryList"] > div',
+        '[class*="memory-item"]',
+        '[class*="memoryItem"]',
+        '[class*="memory-card"]',
+        '[class*="memoryCard"]',
+        '[class*="memory-entry"]',
+        '[class*="memoryEntry"]',
+        '[data-memory-id]',
         '[data-memory]',
-        '[class*="ltm"]',
-        '[class*="long-term"]',
-        '.memory-item',
-        '.memory-card',
-        '.memory-entry',
-        '[class*="memory-list"] > *',
-        '[class*="memoryList"] > *',
     ]
 
     for selector in selectors:
@@ -137,36 +237,20 @@ def scrape_memories_from_page(page):
                 print(f"  [+] Found {len(elements)} elements matching '{selector}'")
                 for el in elements:
                     text = el.inner_text().strip()
-                    if text and len(text) > 5:
-                        # Try to get any data attributes
+                    # Memory entries are typically 10-3000 chars
+                    if text and 10 < len(text) < 3000:
                         memory_id = (
                             el.get_attribute("data-memory-id")
                             or el.get_attribute("data-id")
-                            or el.get_attribute("id")
                             or ""
                         )
                         memories.append({
                             "id": memory_id,
                             "content": text,
-                            "selector": selector
+                            "source": "dom_scrape",
                         })
         except Exception:
             continue
-
-    # Fallback: grab all text blocks that look like memories
-    if not memories:
-        print("  [*] Trying fallback: scanning all text blocks...")
-        all_divs = page.query_selector_all("div, p, span, li")
-        for div in all_divs:
-            text = div.inner_text().strip()
-            classes = div.get_attribute("class") or ""
-            # Heuristic: memory entries are usually medium-length text blocks
-            if 20 < len(text) < 3000 and "memory" in classes.lower():
-                memories.append({
-                    "id": "",
-                    "content": text,
-                    "selector": "fallback"
-                })
 
     return memories
 
@@ -319,6 +403,7 @@ Examples:
     parser.add_argument("--output", default=DEFAULT_OUTPUT_DIR, help="Output directory (default: exports/)")
     parser.add_argument("--headed", action="store_true", help="Show browser window (default: headless after login)")
     parser.add_argument("--timeout", type=int, default=300, help="Login timeout in seconds (default: 300)")
+    parser.add_argument("--debug", action="store_true", help="Dump all captured API responses to a debug file")
     args = parser.parse_args()
 
     print("=" * 50)
@@ -438,34 +523,40 @@ Examples:
             # Scroll to load all content
             scroll_to_load_all(page)
 
-            # Scrape memories from DOM
-            memories = scrape_memories_from_page(page)
+            # Wait a bit for any final API calls to complete
+            time.sleep(3)
 
-            # Also check intercepted API responses
-            if captured["memories"]:
-                print(f"  [+] Also captured {len(captured['memories'])} API responses")
-                for api_mem in captured["memories"]:
-                    data = api_mem.get("data", {})
-                    if isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, dict):
-                                memories.append({
-                                    "id": item.get("id", ""),
-                                    "content": item.get("content", "") or item.get("text", "") or json.dumps(item),
-                                    "selector": "api_intercept",
-                                    "raw": item
-                                })
-                    elif isinstance(data, dict):
-                        items = data.get("memories", []) or data.get("data", []) or data.get("results", [])
-                        if isinstance(items, list):
-                            for item in items:
-                                if isinstance(item, dict):
-                                    memories.append({
-                                        "id": item.get("id", ""),
-                                        "content": item.get("content", "") or item.get("text", "") or json.dumps(item),
-                                        "selector": "api_intercept",
-                                        "raw": item
-                                    })
+            # Primary: extract memories from intercepted API responses
+            print(f"  [*] Captured {len(captured['responses'])} API responses")
+            if captured['requests']:
+                print(f"  [*] API URLs seen:")
+                for url in captured['requests']:
+                    print(f"      {url[:120]}")
+
+            memories = extract_memories_from_responses(captured)
+            print(f"  [*] Extracted {len(memories)} memories from API responses")
+
+            # Debug: dump all captured responses
+            if args.debug:
+                os.makedirs(args.output, exist_ok=True)
+                debug_path = os.path.join(args.output, f"{shape['name']}_api_debug.json")
+                # Strip large bodies to keep debug file manageable
+                debug_data = []
+                for r in captured["responses"]:
+                    entry = {"url": r["url"], "status": r["status"], "body_length": r["body_length"]}
+                    if r["data"] is not None:
+                        entry["data_preview"] = json.dumps(r["data"])[:2000]
+                    elif r.get("body_preview"):
+                        entry["body_preview"] = r["body_preview"]
+                    debug_data.append(entry)
+                with open(debug_path, "w", encoding="utf-8") as f:
+                    json.dump(debug_data, f, indent=2, ensure_ascii=False)
+                print(f"  [*] Debug: saved {len(debug_data)} API responses to {debug_path}")
+
+            # Fallback: try DOM scraping if API interception got nothing
+            if not memories:
+                print("  [*] No memories from API, trying DOM fallback...")
+                memories = scrape_memories_from_dom(page)
 
             if memories:
                 json_path, txt_path, count = export_memories(memories, shape["name"], args.output)
