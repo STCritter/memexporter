@@ -4,3 +4,4 @@ __pycache__/
 .env
 *_debug.html
 .installed
+venv/
