@@ -9,6 +9,6 @@ if "%~1"=="" (
     exit /b 1
 )
 
-python json2txt.py "%~1"
+python3 json2txt.py "%~1" 2>nul || python json2txt.py "%~1"
 echo.
 pause
