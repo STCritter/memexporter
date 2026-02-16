@@ -255,38 +255,103 @@ def scrape_memories_from_dom(page):
     return memories
 
 
-def scroll_to_load_all(page, max_scrolls=50):
-    """Scroll down to load all memories if the page uses infinite scroll."""
-    print("  [*] Scrolling to load all memories...")
-    prev_height = 0
-    stable_count = 0
+def load_all_memory_pages(page, max_pages=200):
+    """Load all memory pages by clicking through pagination and scrolling.
+    Shapes.inc loads memories in pages — this clicks Next/arrow buttons
+    to iterate through all of them so the API interception captures everything."""
+    print("  [*] Loading all memory pages...")
 
-    for i in range(max_scrolls):
+    # Common selectors for pagination next buttons
+    next_selectors = [
+        'button:has-text("Next")',
+        'button:has-text("next")',
+        'a:has-text("Next")',
+        'button[aria-label="Next"]',
+        'button[aria-label="Next page"]',
+        'a[aria-label="Next"]',
+        'a[aria-label="Next page"]',
+        '[class*="next"]',
+        '[class*="Next"]',
+        '[class*="pagination"] button:last-child',
+        '[class*="Pagination"] button:last-child',
+        'button:has-text(">")',
+        'button:has-text("→")',
+        'button:has-text("›")',
+        'a:has-text(">")',
+        'a:has-text("→")',
+        'a:has-text("›")',
+        # SVG arrow buttons (common in React UIs)
+        'button svg[class*="right"]',
+        'button svg[class*="next"]',
+        'button svg[class*="arrow"]',
+    ]
+
+    # Also look for "Load More" style buttons
+    load_more_selectors = [
+        'button:has-text("Load More")',
+        'button:has-text("Show More")',
+        'button:has-text("load more")',
+        'button:has-text("show more")',
+        '[class*="load-more"]',
+        '[class*="loadMore"]',
+        '[class*="show-more"]',
+        '[class*="showMore"]',
+    ]
+
+    page_num = 1
+
+    for _ in range(max_pages):
+        # First scroll to bottom of current page to load any lazy content
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        time.sleep(1.5)
+        time.sleep(1)
 
-        # Check for "load more" buttons
-        load_more = page.query_selector(
-            'button:has-text("Load More"), button:has-text("Show More"), '
-            'button:has-text("load more"), [class*="load-more"], [class*="loadMore"]'
-        )
-        if load_more:
+        # Try "Load More" buttons first (appends to current page)
+        load_more_clicked = False
+        for selector in load_more_selectors:
             try:
-                load_more.click()
-                time.sleep(2)
+                btn = page.query_selector(selector)
+                if btn and btn.is_visible() and btn.is_enabled():
+                    btn.click()
+                    load_more_clicked = True
+                    time.sleep(2)
+                    break
             except Exception:
-                pass
+                continue
 
-        curr_height = page.evaluate("document.body.scrollHeight")
-        if curr_height == prev_height:
-            stable_count += 1
-            if stable_count >= 3:
-                break
-        else:
-            stable_count = 0
-        prev_height = curr_height
+        if load_more_clicked:
+            continue
 
-    print(f"  [*] Scrolling complete after {i + 1} iterations")
+        # Try pagination "Next" buttons
+        next_clicked = False
+        for selector in next_selectors:
+            try:
+                btn = page.query_selector(selector)
+                if btn and btn.is_visible() and btn.is_enabled():
+                    # Check it's not disabled
+                    disabled = btn.get_attribute("disabled")
+                    aria_disabled = btn.get_attribute("aria-disabled")
+                    classes = btn.get_attribute("class") or ""
+                    if disabled is not None or aria_disabled == "true" or "disabled" in classes.lower():
+                        continue
+                    btn.click()
+                    next_clicked = True
+                    page_num += 1
+                    print(f"  [*] Loading page {page_num}...")
+                    time.sleep(2)
+                    # Wait for network to settle after page change
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5000)
+                    except Exception:
+                        pass
+                    break
+            except Exception:
+                continue
+
+        if not next_clicked:
+            # No more pages
+            break
+
+    print(f"  [*] Loaded {page_num} page(s) of memories")
 
 
 def navigate_to_memories(page, shape_url):
@@ -514,14 +579,18 @@ Examples:
             print(f"[*] Processing: {shape['name']}")
             print(f"{'=' * 40}")
 
+            # Clear captured data from previous shape
+            captured["responses"].clear()
+            captured["requests"].clear()
+
             # Navigate to memories page
             if navigate_to_memories(page, shape["url"]):
                 print("  [+] Found memories page")
             else:
                 print("  [!] Could not find memories page, trying to scrape current page...")
 
-            # Scroll to load all content
-            scroll_to_load_all(page)
+            # Click through all memory pages (pagination)
+            load_all_memory_pages(page)
 
             # Wait a bit for any final API calls to complete
             time.sleep(3)
