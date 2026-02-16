@@ -1,6 +1,6 @@
 # Shapes.inc Memory Exporter
 
-Export your long-term memories from [Shapes.inc](https://shapes.inc) bots. Handles pagination automatically (even 500+ pages), saves progress so nothing is lost, and exports to JSON + TXT.
+Export your long-term memories from [Shapes.inc](https://shapes.inc) bots. Uses the Shapes.inc API for instant downloads — even shapes with 500+ pages export in seconds. Falls back to page scraping if needed. Exports to JSON + TXT.
 
 ## Setup (one time)
 

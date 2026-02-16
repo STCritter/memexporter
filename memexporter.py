@@ -19,6 +19,8 @@ import os
 import re
 import sys
 import time
+import urllib.request
+import urllib.error
 from datetime import datetime
 
 try:
@@ -439,30 +441,151 @@ def is_logged_in(p, profile, browser_path, use_firefox=False):
         return False
 
 
-def export_shape(page, url, output_dir, debug=False, max_pages=None, slow=False):
+def get_shape_uuid(page, memory_url):
+    """Navigate to memory page and intercept the API call to get the shape UUID."""
+    shape_uuid = None
+    api_url_found = None
+
+    def on_response(response):
+        nonlocal shape_uuid, api_url_found
+        url = response.url
+        if "/api/memory/" in url and "?" in url:
+            # Extract UUID from URL like /api/memory/{uuid}?page=1&limit=20
+            match = re.search(r"/api/memory/([a-f0-9-]+)", url)
+            if match:
+                shape_uuid = match.group(1)
+                api_url_found = url
+
+    page.on("response", on_response)
+    page.goto(memory_url, timeout=60000)
+    time.sleep(5)
+
+    # Wait for memory content to render
+    try:
+        page.wait_for_selector("text=User Memory", timeout=30000)
+    except Exception:
+        pass
+    time.sleep(2)
+
+    page.remove_listener("response", on_response)
+    return shape_uuid
+
+
+def fetch_memories_via_api(context, shape_uuid, max_pages=None):
+    """Fetch all memories using the API endpoint via the browser context."""
+    all_memories = []
+    page_num = 1
+    limit = 1000
+
+    while True:
+        if max_pages and page_num > max_pages:
+            break
+
+        api_url = f"https://shapes.inc/api/memory/{shape_uuid}?page={page_num}&limit={limit}"
+        print(f"  [*] Fetching page {page_num} via API...", end="")
+
+        # Use a hidden page in the same context to make the API call (keeps cookies)
+        api_page = context.new_page()
+        try:
+            resp = api_page.goto(api_url, timeout=30000)
+            if resp.status != 200:
+                print(f" error {resp.status}")
+                api_page.close()
+                break
+
+            raw = api_page.inner_text("body")
+            data = json.loads(raw)
+            api_page.close()
+        except Exception as e:
+            print(f" error: {e}")
+            try:
+                api_page.close()
+            except Exception:
+                pass
+            break
+
+        # Parse the response
+        entries = data if isinstance(data, list) else data.get("memories", data.get("data", []))
+        if isinstance(data, dict) and not isinstance(entries, list):
+            entries = [data]
+
+        # Handle single-object response (the whole response IS the list)
+        if isinstance(data, list):
+            entries = data
+
+        # Extract memory entries
+        page_memories = []
+        items = entries if isinstance(entries, list) else [entries]
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            content = entry.get("result", entry.get("content", ""))
+            if not content:
+                continue
+            summary_type = entry.get("summary_type", "unknown")
+            created = entry.get("created_at", "")
+            date_str = ""
+            if created:
+                try:
+                    dt = datetime.fromtimestamp(float(created))
+                    date_str = dt.strftime("%m/%d/%Y")
+                except Exception:
+                    date_str = str(created)
+            page_memories.append({
+                "type": summary_type,
+                "content": content,
+                "date": date_str,
+            })
+
+        print(f" {len(page_memories)} memories")
+        all_memories.extend(page_memories)
+
+        # Check pagination
+        pagination = data.get("pagination", {}) if isinstance(data, dict) else {}
+        has_next = pagination.get("has_next", False)
+        total = pagination.get("total", len(all_memories))
+        total_pages = pagination.get("total_pages", 1)
+
+        if total_pages > 1:
+            print(f"  [*] Total: {total} memories across {total_pages} page(s)")
+
+        if not has_next or not page_memories:
+            break
+        page_num += 1
+
+    return all_memories
+
+
+def export_shape(page, context, url, output_dir, debug=False, max_pages=None, slow=False):
     """Export memories from a single shape URL. Returns count exported."""
     memory_url = url_to_memory_url(url)
     shape_name = url_to_shape_name(url)
-
-    wait_nav = 10 if slow else 5
-    wait_render = 6 if slow else 3
-    timeout = 120000 if slow else 60000
 
     print(f"\n  [*] Shape: {shape_name}")
     print(f"  [*] URL:   {memory_url}")
     print(f"  [*] Navigating...")
 
-    page.goto(memory_url, timeout=timeout)
-    time.sleep(wait_nav)
+    # Try API approach first: intercept the API call to get shape UUID
+    shape_uuid = get_shape_uuid(page, memory_url)
 
-    # Wait for memory content to render (React SPA)
-    try:
-        page.wait_for_selector("text=User Memory", timeout=timeout)
-    except Exception:
-        pass
-    time.sleep(wait_render)
+    if shape_uuid:
+        print(f"  [+] Found shape ID: {shape_uuid[:8]}...")
+        print(f"  [*] Fetching memories via API (fast mode)...")
+        memories = fetch_memories_via_api(context, shape_uuid, max_pages=max_pages)
 
-    # Check if we landed on the actual memory page (not just the public profile)
+        if memories:
+            json_path, txt_path, count = export_memories(memories, shape_name, output_dir)
+            print(f"\n  [+] Exported {count} memories!")
+            print(f"      JSON: {json_path}")
+            print(f"      TXT:  {txt_path}")
+            return count
+        else:
+            print("  [!] API returned no memories, falling back to page scraping...")
+
+    # Fallback: old DOM scraping approach
+    print("  [*] Using page scraping (slower)...")
+
+    # Check if we landed on the actual memory page
     body = page.inner_text("body")
     is_memory_page = "User Memory" in body and ("Page" in body or "SELECT ALL" in body or "Add New Memory" in body)
     if not is_memory_page:
@@ -480,8 +603,6 @@ def export_shape(page, url, output_dir, debug=False, max_pages=None, slow=False)
         return 0
 
     print("  [+] Memory page loaded!")
-
-    # Scrape all pages
     memories = scrape_all_memory_pages(page, shape_name=shape_name, output_dir=output_dir, max_pages=max_pages, slow=slow)
 
     if memories:
@@ -613,7 +734,7 @@ def interactive_flow(args):
 
         for i, raw_url in enumerate(urls, 1):
             print(f"\n  --- Shape {i}/{len(urls)} ---")
-            count = export_shape(page, raw_url, args.output, debug=args.debug, max_pages=max_pages, slow=slow)
+            count = export_shape(page, ctx, raw_url, args.output, debug=args.debug, max_pages=max_pages, slow=slow)
             total_exported += count
             results.append((url_to_shape_name(raw_url), count))
 
