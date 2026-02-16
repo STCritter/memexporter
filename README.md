@@ -1,22 +1,15 @@
 # Shapes.inc Memory Exporter
 
-Export your long-term memories from [Shapes.inc](https://shapes.inc) bots. Supports all your shapes, handles pagination automatically, and saves to JSON + TXT.
+Export your long-term memories from [Shapes.inc](https://shapes.inc) bots. Handles pagination automatically (even 500+ pages), saves progress so nothing is lost, and exports to JSON + TXT.
 
-## Two ways to use it
-
-### Option 1: Python script (recommended)
-
-#### Setup (one time)
+## Setup (one time)
 
 1. Install [Python 3.8+](https://www.python.org/downloads/) and [Chrome](https://www.google.com/chrome/) or [Chromium](https://www.chromium.org/)
 2. Download this repo — click the green **Code** button above → **Download ZIP** → unzip it
-3. Open a terminal in the folder and run:
-```bash
-pip install -r requirements.txt
-playwright install chromium
-```
 
-#### Running it
+That's it. Dependencies install automatically on first run.
+
+## Running it
 
 - **Windows** — double-click `run.bat`
 - **Linux / macOS** — double-click `run.sh` (or run `./run.sh`)
@@ -27,14 +20,14 @@ The script walks you through everything:
 2. Asks you to paste your memory page URL(s)
 3. Scrapes all pages and downloads the results
 
-#### How to find your memory URL
+### How to find your memory URL
 
 1. Go to `shapes.inc` in your browser
 2. Open your shape's page
 3. Click **Memory** in the sidebar
 4. Copy the URL from the address bar — looks like: `shapes.inc/your-shape/user/memory`
 
-#### Options
+### Options
 
 ```bash
 # Pass URLs directly (skip the prompts)
@@ -47,18 +40,12 @@ python memexporter.py --output ./my_backup
 python memexporter.py --debug
 ```
 
----
+### Large exports (hundreds of pages)
 
-### Option 2: Chrome extension (no Python needed)
-
-1. Download this repo and unzip it
-2. Open Chrome → go to `chrome://extensions`
-3. Turn on **Developer mode** (top right toggle)
-4. Click **Load unpacked** → select the `extension` folder
-5. Go to your shape's memory page on `shapes.inc`
-6. Click the extension icon → **Export Memories**
-
----
+The script handles large shapes automatically:
+- Shows progress with percentage and running total
+- Saves progress every 50 pages — if it crashes, your data is safe in `exports/shapename_progress.json`
+- Retries automatically if a page fails to load
 
 ## Output
 
