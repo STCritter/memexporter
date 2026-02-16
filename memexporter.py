@@ -509,21 +509,48 @@ def interactive_flow(args):
     max_pages = getattr(args, 'pages', None)
     slow = getattr(args, 'slow', False)
 
-    if use_firefox:
-        profile = profile + "-firefox"
-
     print()
     print("=" * 50)
     print("  Shapes.inc Memory Exporter")
-    if use_firefox:
-        print("  (using Firefox)")
-    if slow:
-        print("  (slow mode — extra wait time for large shapes)")
     print("=" * 50)
+
+    # --- Interactive options (only if not already set via CLI flags) ---
+    if not args.urls and not use_firefox and not slow and max_pages is None:
+        print()
+        print("  Options (just press Enter to skip):")
+        print()
+
+        # Browser choice
+        browser_choice = input("  Use Firefox instead of Chrome? (y/N): ").strip().lower()
+        if browser_choice in ("y", "yes"):
+            use_firefox = True
+        print()
+
+        # Slow mode
+        slow_choice = input("  Slow mode? Recommended for shapes with lots of memories (y/N): ").strip().lower()
+        if slow_choice in ("y", "yes"):
+            slow = True
+        print()
+
+        # Page limit
+        pages_input = input("  Max pages to scrape? (Enter = all, or type a number): ").strip()
+        if pages_input.isdigit() and int(pages_input) > 0:
+            max_pages = int(pages_input)
+        print()
+
+    if use_firefox:
+        profile = profile + "-firefox"
+
+    if use_firefox:
+        print("  [*] Using Firefox")
+    if slow:
+        print("  [*] Slow mode ON")
+    if max_pages:
+        print(f"  [*] Scraping first {max_pages} page(s) only")
 
     if not use_firefox and not browser_path:
         print("\n  [!] Could not find Chromium or Google Chrome.")
-        print("  [!] Install one, use --browser-path, or try --firefox")
+        print("  [!] Install one, use --browser-path, or try Firefox")
         sys.exit(1)
 
     # --- Step 1: Check login ---
