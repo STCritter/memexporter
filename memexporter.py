@@ -25,7 +25,7 @@ try:
     from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
 except ImportError:
     print("ERROR: Playwright is not installed.")
-    print("Run: pip install playwright && playwright install chromium")
+    print("Run: pip install playwright && playwright install chromium firefox")
     sys.exit(1)
 
 
@@ -223,37 +223,44 @@ def go_to_first_page(page):
         time.sleep(1)  # Let DOM settle
 
 
-def scrape_all_memory_pages(page, shape_name=None, output_dir=None):
+def scrape_all_memory_pages(page, shape_name=None, output_dir=None, max_pages=None, slow=False):
     """Scrape memories from all pages, starting from page 1."""
     all_memories = []
+    page_wait = 3 if slow else 1
 
     # Always navigate to page 1 first
     go_to_first_page(page)
 
     current_page, total_pages = get_page_info(page)
-    print(f"  [*] {total_pages} page(s) of memories")
+    scrape_pages = min(total_pages, max_pages) if max_pages else total_pages
+    if max_pages and max_pages < total_pages:
+        print(f"  [*] {total_pages} page(s) total, scraping first {scrape_pages}")
+    else:
+        print(f"  [*] {total_pages} page(s) of memories")
 
     # For large exports, save incrementally every 50 pages
     save_every = 50
 
-    for pg in range(1, total_pages + 1):
+    for pg in range(1, scrape_pages + 1):
         if pg > 1:
             if not click_next_page(page):
                 print(f"  [!] Could not go to page {pg}, retrying...")
-                time.sleep(2)
+                time.sleep(3)
                 if not click_next_page(page):
                     print(f"  [!] Failed to go to page {pg}. Saving what we have.")
                     break
+            if slow:
+                time.sleep(page_wait)
 
         page_memories = scrape_current_page_memories(page)
         count = len(page_memories)
-        pct = int(pg / total_pages * 100)
+        pct = int(pg / scrape_pages * 100)
         print(f"  [*] Page {pg}/{total_pages} ({pct}%): {count} memories", end="")
         all_memories.extend(page_memories)
         print(f"  [total: {len(all_memories)}]")
 
         # Incremental save for large exports
-        if shape_name and output_dir and total_pages > 10 and pg % save_every == 0:
+        if shape_name and output_dir and scrape_pages > 10 and pg % save_every == 0:
             _save_progress(all_memories, shape_name, output_dir)
             print(f"  [*] Progress saved ({len(all_memories)} memories so far)")
 
@@ -333,15 +340,25 @@ def url_to_shape_name(url):
 
 
 def make_launch_kwargs(browser_path):
-    """Common browser launch options."""
-    return {
+    """Common kwargs for launching the browser."""
+    kwargs = {
         "headless": False,
         "args": ["--disable-blink-features=AutomationControlled"],
         "viewport": {"width": 1280, "height": 900},
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "executable_path": browser_path,
     }
+    if browser_path:
+        kwargs["executable_path"] = browser_path
+    return kwargs
+
+
+def _launch_browser(p, profile, browser_path):
+    """Launch browser with persistent context. Returns (context, page)."""
+    kwargs = make_launch_kwargs(browser_path)
+    ctx = p.chromium.launch_persistent_context(profile, **kwargs)
+    pg = ctx.pages[0] if ctx.pages else ctx.new_page()
+    return ctx, pg
 
 
 def do_login(p, profile, browser_path):
@@ -356,9 +373,8 @@ def do_login(p, profile, browser_path):
     print()
 
     os.makedirs(profile, exist_ok=True)
-    ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
-    pg = ctx.pages[0] if ctx.pages else ctx.new_page()
-    pg.goto("https://talk.shapes.inc/login", timeout=30000)
+    ctx, pg = _launch_browser(p, profile, browser_path)
+    pg.goto("https://talk.shapes.inc/login", timeout=60000)
 
     print("  [*] Waiting for you to log in...")
     logged_in = False
@@ -402,9 +418,8 @@ def is_logged_in(p, profile, browser_path):
     if not os.path.exists(profile):
         return False
     try:
-        ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
-        pg = ctx.pages[0] if ctx.pages else ctx.new_page()
-        pg.goto("https://shapes.inc/dashboard", timeout=20000)
+        ctx, pg = _launch_browser(p, profile, browser_path)
+        pg.goto("https://shapes.inc/dashboard", timeout=30000)
         time.sleep(6)
         body = pg.inner_text("body")
         url = pg.url
@@ -413,27 +428,35 @@ def is_logged_in(p, profile, browser_path):
         ctx.close()
         return logged
     except Exception:
+        try:
+            ctx.close()
+        except Exception:
+            pass
         return False
 
 
-def export_shape(page, url, output_dir, debug=False):
+def export_shape(page, url, output_dir, debug=False, max_pages=None, slow=False):
     """Export memories from a single shape URL. Returns count exported."""
     memory_url = url_to_memory_url(url)
     shape_name = url_to_shape_name(url)
+
+    wait_nav = 10 if slow else 5
+    wait_render = 6 if slow else 3
+    timeout = 120000 if slow else 60000
 
     print(f"\n  [*] Shape: {shape_name}")
     print(f"  [*] URL:   {memory_url}")
     print(f"  [*] Navigating...")
 
-    page.goto(memory_url, timeout=30000)
-    time.sleep(4)
+    page.goto(memory_url, timeout=timeout)
+    time.sleep(wait_nav)
 
     # Wait for memory content to render (React SPA)
     try:
-        page.wait_for_selector("text=User Memory", timeout=10000)
+        page.wait_for_selector("text=User Memory", timeout=timeout)
     except Exception:
         pass
-    time.sleep(2)
+    time.sleep(wait_render)
 
     # Check if we landed on the actual memory page (not just the public profile)
     body = page.inner_text("body")
@@ -455,7 +478,7 @@ def export_shape(page, url, output_dir, debug=False):
     print("  [+] Memory page loaded!")
 
     # Scrape all pages
-    memories = scrape_all_memory_pages(page, shape_name=shape_name, output_dir=output_dir)
+    memories = scrape_all_memory_pages(page, shape_name=shape_name, output_dir=output_dir, max_pages=max_pages, slow=slow)
 
     if memories:
         json_path, txt_path, count = export_memories(memories, shape_name, output_dir)
@@ -478,10 +501,14 @@ def interactive_flow(args):
     """Guided interactive mode — walks the user through everything."""
     profile = args.profile or DEFAULT_PROFILE_DIR
     browser_path = args.browser_path or find_browser()
+    max_pages = getattr(args, 'pages', None)
+    slow = getattr(args, 'slow', False)
 
     print()
     print("=" * 50)
     print("  Shapes.inc Memory Exporter")
+    if slow:
+        print("  (slow mode — extra wait time for large shapes)")
     print("=" * 50)
 
     if not browser_path:
@@ -542,15 +569,14 @@ def interactive_flow(args):
     print("=" * 50)
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(profile, **make_launch_kwargs(browser_path))
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        ctx, page = _launch_browser(p, profile, browser_path)
 
         total_exported = 0
         results = []
 
         for i, raw_url in enumerate(urls, 1):
             print(f"\n  --- Shape {i}/{len(urls)} ---")
-            count = export_shape(page, raw_url, args.output, debug=args.debug)
+            count = export_shape(page, raw_url, args.output, debug=args.debug, max_pages=max_pages, slow=slow)
             total_exported += count
             results.append((url_to_shape_name(raw_url), count))
 
@@ -595,6 +621,10 @@ Or pass URLs directly:
                         help="Path to Chromium/Chrome (auto-detected if not set)")
     parser.add_argument("--profile", default=None,
                         help=f"Browser profile dir (default: {DEFAULT_PROFILE_DIR})")
+    parser.add_argument("--slow", action="store_true",
+                        help="Slow mode — longer wait times for large shapes that take time to load")
+    parser.add_argument("--pages", type=int, default=None,
+                        help="Only scrape first N pages (useful for very large shapes)")
     args = parser.parse_args()
 
     interactive_flow(args)

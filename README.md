@@ -33,6 +33,12 @@ The script walks you through everything:
 # Pass URLs directly (skip the prompts)
 python memexporter.py https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
 
+# Slow mode — extra wait time for large shapes
+python memexporter.py --slow
+
+# Only scrape first 10 pages
+python memexporter.py --pages 10
+
 # Custom output folder
 python memexporter.py --output ./my_backup
 
@@ -42,9 +48,11 @@ python memexporter.py --debug
 
 ### Large exports (hundreds of pages)
 
-The script handles large shapes automatically:
-- Shows progress with percentage and running total
-- Saves progress every 50 pages — if it crashes, your data is safe in `exports/shapename_progress.json`
+If your shape has a lot of memories:
+- Use `--slow` — gives the page extra time to load between pages
+- Use `--pages 10` to scrape in batches (first 10 pages, then `--pages 20`, etc.)
+- Combine both: `python memexporter.py --slow --pages 10`
+- Progress saves every 50 pages — if it crashes, your data is safe in `exports/shapename_progress.json`
 - Retries automatically if a page fails to load
 
 ## Output
@@ -91,6 +99,7 @@ User mentioned they like pizza...
 - **"Doesn't look like a memory page"** — you're not logged in, or the session expired. Run the script again and it will re-prompt login.
 - **"No memories found"** — run with `--debug` and check the `_debug.html` file. Open an issue if it persists.
 - **Browser doesn't open** — make sure Chrome or Chromium is installed. Use `--browser-path /path/to/chrome` if auto-detection fails.
+- **Large shape won't load** — try `--slow` and/or `--pages 10` to scrape in smaller batches.
 
 ## Limitations
 
