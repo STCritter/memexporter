@@ -166,69 +166,69 @@ def scrape_current_page_memories(page):
     return memories
 
 
-def click_next_page(page):
-    """Click the right/next arrow button in pagination. Returns True if clicked."""
-    # Try aria-label first (most reliable)
+def _click_page_button(page, aria_label):
+    """Click a pagination button by aria-label. Returns True if clicked."""
     try:
-        btn = page.query_selector('button[aria-label="Next page"]')
-        if btn and btn.is_visible():
-            btn.click()
+        btn = page.query_selector(f'button[aria-label="{aria_label}"]')
+        if btn and btn.is_visible() and btn.is_enabled():
+            btn.click(timeout=5000)
             time.sleep(1)
             return True
     except Exception:
         pass
 
-    # Try finding button with right arrow icon
+    # Fallback: find buttons with right/left arrow icons
+    is_next = "Next" in aria_label
     try:
         buttons = page.query_selector_all("button")
         for btn in buttons:
             try:
                 inner = btn.inner_html()
-                text = btn.inner_text().strip()
-                if ('data-icon="right"' in inner or "fa-right" in inner
-                        or "chevron-right" in inner or "arrow-right" in inner
-                        or "ChevronRight" in inner or text in ("\u2192", "\u203a", ">")):
+                icon = 'data-icon="right"' if is_next else 'data-icon="left"'
+                fa = "fa-right" if is_next else "fa-left"
+                if icon in inner or fa in inner:
                     if btn.is_visible() and btn.is_enabled():
-                        disabled = btn.get_attribute("disabled")
-                        if disabled is None:
-                            btn.click()
-                            time.sleep(1)
-                            return True
+                        btn.click(timeout=5000)
+                        time.sleep(1)
+                        return True
             except Exception:
                 continue
-    except Exception:
-        pass
-
-    # Fallback: find buttons near "Page X of Y" text
-    try:
-        pagination = page.query_selector("text=/Page \\d+ of \\d+/")
-        if pagination:
-            parent = pagination.evaluate_handle("el => el.parentElement")
-            if parent:
-                btns = parent.query_selector_all("button")
-                if len(btns) >= 2:
-                    btns[-1].click()
-                    time.sleep(1)
-                    return True
     except Exception:
         pass
 
     return False
 
 
+def click_next_page(page):
+    """Click the next page button. Returns True if clicked."""
+    return _click_page_button(page, "Next page")
+
+
+def click_prev_page(page):
+    """Click the previous page button. Returns True if clicked."""
+    return _click_page_button(page, "Previous page")
+
+
+def go_to_first_page(page):
+    """Navigate back to page 1 by clicking Previous repeatedly."""
+    current, total = get_page_info(page)
+    if current > 1:
+        print(f"  [*] On page {current}, going back to page 1...")
+    while current > 1:
+        if not click_prev_page(page):
+            break
+        time.sleep(1)
+        current, total = get_page_info(page)
+    if current == 1:
+        time.sleep(1)  # Let DOM settle
+
+
 def scrape_all_memory_pages(page, shape_name=None, output_dir=None):
     """Scrape memories from all pages, starting from page 1."""
     all_memories = []
 
-    # Reload the page to ensure we start from page 1
-    current_page, total_pages = get_page_info(page)
-    if current_page != 1:
-        page.reload()
-        try:
-            page.wait_for_selector("text=User Memory", timeout=10000)
-        except Exception:
-            pass
-        time.sleep(2)
+    # Always navigate to page 1 first
+    go_to_first_page(page)
 
     current_page, total_pages = get_page_info(page)
     print(f"  [*] {total_pages} page(s) of memories")
