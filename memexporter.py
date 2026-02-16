@@ -152,24 +152,48 @@ def url_to_shape_name(url):
 def get_shape_uuid(page, memory_url):
     """Navigate to memory page and intercept the API call to get the shape UUID."""
     shape_uuid = None
+    shape_uuid_fallback = None
 
     def on_response(response):
-        nonlocal shape_uuid
-        if "/api/memory/" in response.url and "?" in response.url:
-            match = re.search(r"/api/memory/([a-f0-9-]+)", response.url)
+        nonlocal shape_uuid, shape_uuid_fallback
+        url = response.url
+        # Primary: intercept the memory API call directly
+        if "/api/memory/" in url and "?" in url:
+            match = re.search(r"/api/memory/([a-f0-9-]+)", url)
             if match:
                 shape_uuid = match.group(1)
+        # Fallback: get UUID from shape info or avatar URLs
+        if not shape_uuid and not shape_uuid_fallback:
+            if "/api/shapes/username/" in url:
+                try:
+                    data = response.json()
+                    shape_uuid_fallback = data.get("id") or data.get("shape_id") or data.get("uuid")
+                except Exception:
+                    pass
+            elif "avatar_" in url:
+                match = re.search(r"avatar_([a-f0-9-]{36})", url)
+                if match:
+                    shape_uuid_fallback = match.group(1)
 
     page.on("response", on_response)
-    page.goto(memory_url, timeout=60000)
-    time.sleep(5)
-    try:
-        page.wait_for_selector("text=User Memory", timeout=30000)
-    except Exception:
-        pass
-    time.sleep(2)
+
+    for attempt in range(2):
+        if attempt > 0:
+            print("  [*] Retrying...")
+        page.goto(memory_url, timeout=60000)
+        try:
+            page.wait_for_selector("text=User Memory", timeout=30000)
+        except Exception:
+            pass
+        for _ in range(10):
+            if shape_uuid:
+                break
+            time.sleep(1)
+        if shape_uuid:
+            break
+
     page.remove_listener("response", on_response)
-    return shape_uuid
+    return shape_uuid or shape_uuid_fallback
 
 
 def fetch_memories_via_api(context, shape_uuid):
@@ -299,8 +323,13 @@ def export_shape(page, context, url, output_dir, debug=False):
     body = page.inner_text("body")
     if "Log in" in body or "Sign up" in body:
         print("  [!] You're not logged in. Run the script again.")
+    elif "No memories" in body or "no memories" in body:
+        print("  [!] This shape has no memories yet.")
     else:
-        print("  [!] You might not have access to this shape's memories.")
+        print("  [!] Possible causes:")
+        print("      - The shape has no memories yet")
+        print("      - You don't have access to this shape's memories")
+        print("      - The page took too long to load (try again)")
     if debug:
         debug_path = os.path.join(output_dir, f"{shape_name}_debug.html")
         os.makedirs(output_dir, exist_ok=True)
