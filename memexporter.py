@@ -339,29 +339,33 @@ def url_to_shape_name(url):
     return match.group(1) if match else "unknown_shape"
 
 
-def make_launch_kwargs(browser_path):
+def make_launch_kwargs(browser_path, use_firefox=False):
     """Common kwargs for launching the browser."""
     kwargs = {
         "headless": False,
-        "args": ["--disable-blink-features=AutomationControlled"],
         "viewport": {"width": 1280, "height": 900},
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     }
+    if not use_firefox:
+        kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+        kwargs["user_agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
     if browser_path:
         kwargs["executable_path"] = browser_path
     return kwargs
 
 
-def _launch_browser(p, profile, browser_path):
+def _launch_browser(p, profile, browser_path, use_firefox=False):
     """Launch browser with persistent context. Returns (context, page)."""
-    kwargs = make_launch_kwargs(browser_path)
-    ctx = p.chromium.launch_persistent_context(profile, **kwargs)
+    kwargs = make_launch_kwargs(browser_path, use_firefox)
+    if use_firefox:
+        ctx = p.firefox.launch_persistent_context(profile, **kwargs)
+    else:
+        ctx = p.chromium.launch_persistent_context(profile, **kwargs)
     pg = ctx.pages[0] if ctx.pages else ctx.new_page()
     return ctx, pg
 
 
-def do_login(p, profile, browser_path):
+def do_login(p, profile, browser_path, use_firefox=False):
     """Handle the login flow. Returns True if login succeeded."""
     print("\n" + "=" * 50)
     print("  Step 1: Log in to Shapes.inc")
@@ -373,7 +377,7 @@ def do_login(p, profile, browser_path):
     print()
 
     os.makedirs(profile, exist_ok=True)
-    ctx, pg = _launch_browser(p, profile, browser_path)
+    ctx, pg = _launch_browser(p, profile, browser_path, use_firefox)
     pg.goto("https://talk.shapes.inc/login", timeout=60000)
 
     print("  [*] Waiting for you to log in...")
@@ -413,12 +417,12 @@ def do_login(p, profile, browser_path):
     return True
 
 
-def is_logged_in(p, profile, browser_path):
+def is_logged_in(p, profile, browser_path, use_firefox=False):
     """Quick check if we have a valid session."""
     if not os.path.exists(profile):
         return False
     try:
-        ctx, pg = _launch_browser(p, profile, browser_path)
+        ctx, pg = _launch_browser(p, profile, browser_path, use_firefox)
         pg.goto("https://shapes.inc/dashboard", timeout=30000)
         time.sleep(6)
         body = pg.inner_text("body")
@@ -500,34 +504,40 @@ def export_shape(page, url, output_dir, debug=False, max_pages=None, slow=False)
 def interactive_flow(args):
     """Guided interactive mode — walks the user through everything."""
     profile = args.profile or DEFAULT_PROFILE_DIR
-    browser_path = args.browser_path or find_browser()
+    use_firefox = getattr(args, 'firefox', False)
+    browser_path = args.browser_path or (None if use_firefox else find_browser())
     max_pages = getattr(args, 'pages', None)
     slow = getattr(args, 'slow', False)
+
+    if use_firefox:
+        profile = profile + "-firefox"
 
     print()
     print("=" * 50)
     print("  Shapes.inc Memory Exporter")
+    if use_firefox:
+        print("  (using Firefox)")
     if slow:
         print("  (slow mode — extra wait time for large shapes)")
     print("=" * 50)
 
-    if not browser_path:
+    if not use_firefox and not browser_path:
         print("\n  [!] Could not find Chromium or Google Chrome.")
-        print("  [!] Install one, or use --browser-path /path/to/chrome")
+        print("  [!] Install one, use --browser-path, or try --firefox")
         sys.exit(1)
 
     # --- Step 1: Check login ---
     print("\n  [*] Checking if you're already logged in...")
 
     with sync_playwright() as p:
-        logged = is_logged_in(p, profile, browser_path)
+        logged = is_logged_in(p, profile, browser_path, use_firefox)
 
     if logged:
         print("  [+] You're logged in!")
     else:
         print("  [!] Not logged in yet.")
         with sync_playwright() as p:
-            if not do_login(p, profile, browser_path):
+            if not do_login(p, profile, browser_path, use_firefox):
                 print("\n  [!] Could not log in. Please try again.")
                 sys.exit(1)
 
@@ -569,7 +579,7 @@ def interactive_flow(args):
     print("=" * 50)
 
     with sync_playwright() as p:
-        ctx, page = _launch_browser(p, profile, browser_path)
+        ctx, page = _launch_browser(p, profile, browser_path, use_firefox)
 
         total_exported = 0
         results = []
@@ -621,6 +631,8 @@ Or pass URLs directly:
                         help="Path to Chromium/Chrome (auto-detected if not set)")
     parser.add_argument("--profile", default=None,
                         help=f"Browser profile dir (default: {DEFAULT_PROFILE_DIR})")
+    parser.add_argument("--firefox", action="store_true",
+                        help="Use Firefox instead of Chrome (requires non-Google login)")
     parser.add_argument("--slow", action="store_true",
                         help="Slow mode — longer wait times for large shapes that take time to load")
     parser.add_argument("--pages", type=int, default=None,

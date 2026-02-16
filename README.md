@@ -33,6 +33,9 @@ The script walks you through everything:
 # Pass URLs directly (skip the prompts)
 python memexporter.py https://shapes.inc/shape1/user/memory https://shapes.inc/shape2/user/memory
 
+# Use Firefox instead of Chrome (better for large shapes, requires non-Google login)
+python memexporter.py --firefox
+
 # Slow mode — extra wait time for large shapes
 python memexporter.py --slow
 
@@ -49,9 +52,10 @@ python memexporter.py --debug
 ### Large exports (hundreds of pages)
 
 If your shape has a lot of memories:
+- Use `--firefox` — Firefox handles heavy pages better than Chrome (only works with email/password login, not Google)
 - Use `--slow` — gives the page extra time to load between pages
 - Use `--pages 10` to scrape in batches (first 10 pages, then `--pages 20`, etc.)
-- Combine both: `python memexporter.py --slow --pages 10`
+- Combine them: `python memexporter.py --firefox --slow --pages 10`
 - Progress saves every 50 pages — if it crashes, your data is safe in `exports/shapename_progress.json`
 - Retries automatically if a page fails to load
 
@@ -99,7 +103,8 @@ User mentioned they like pizza...
 - **"Doesn't look like a memory page"** — you're not logged in, or the session expired. Run the script again and it will re-prompt login.
 - **"No memories found"** — run with `--debug` and check the `_debug.html` file. Open an issue if it persists.
 - **Browser doesn't open** — make sure Chrome or Chromium is installed. Use `--browser-path /path/to/chrome` if auto-detection fails.
-- **Large shape won't load** — try `--slow` and/or `--pages 10` to scrape in smaller batches.
+- **Large shape won't load** — try `--firefox --slow` and/or `--pages 10` to scrape in smaller batches.
+- **"This browser or app may not be secure"** — Google blocks automated Firefox. Use `--firefox` only if you log in with email/password, not Google.
 
 ## Limitations
 

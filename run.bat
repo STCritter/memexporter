@@ -11,7 +11,7 @@ if not exist ".installed" (
         pause
         exit /b 1
     )
-    playwright install chromium
+    playwright install chromium firefox
     echo. > .installed
     echo.
 )
